@@ -8,7 +8,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import uvicorn
@@ -18,7 +18,10 @@ from app.models.calculation import Calculation
 from app.models.user import User
 from app.schemas.calculation import CalculationBase, CalculationResponse, CalculationUpdate
 from app.schemas.token import TokenResponse
-from app.schemas.user import UserCreate, UserResponse, UserLogin
+from app.schemas.user import (
+    UserCreate, UserResponse, UserLogin,
+    UserProfileUpdate, PasswordChange, UserProfileResponse
+)
 from app.database import Base, get_db, engine
 
 
@@ -61,6 +64,12 @@ def register_page(request: Request):
 @app.get("/dashboard", response_class=HTMLResponse, tags=["web"])
 def dashboard_page(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request})
+
+# Profile page route (NEW)
+@app.get("/profile", response_class=HTMLResponse, tags=["web"])
+def profile_page(request: Request):
+    """Render the profile page"""
+    return templates.TemplateResponse("profile.html", {"request": request})
 
 # View a specific calculation
 @app.get("/view-calculation/{calc_id}", response_class=HTMLResponse, tags=["web"])
@@ -170,6 +179,92 @@ def login_form(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = D
         "access_token": auth_result["access_token"],
         "token_type": "bearer"
     }
+
+# =====================================================================
+# USER PROFILE ROUTES (NEW)
+# =====================================================================
+
+@app.get("/api/profile", response_model=UserProfileResponse, tags=["profile"])
+def get_profile(current_user: User = Depends(get_current_active_user)):
+    """Get current user's profile"""
+    return current_user
+
+
+@app.put("/api/profile", response_model=UserProfileResponse, tags=["profile"])
+def update_profile(
+    profile_update: UserProfileUpdate,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Update current user's profile (username, email, name)"""
+    try:
+        # Check if new username already exists (and it's not their current username)
+        if profile_update.username != current_user.username:
+            existing_user = db.query(User).filter(
+                User.username == profile_update.username
+            ).first()
+            if existing_user:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Username already taken"
+                )
+        
+        # Check if new email already exists (and it's not their current email)
+        if profile_update.email != current_user.email:
+            existing_user = db.query(User).filter(
+                User.email == profile_update.email
+            ).first()
+            if existing_user:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Email already in use"
+                )
+        
+        # Update user
+        current_user.username = profile_update.username
+        current_user.email = profile_update.email
+        current_user.first_name = profile_update.first_name
+        current_user.last_name = profile_update.last_name
+        current_user.updated_at = datetime.now(timezone.utc)
+        
+        db.commit()
+        db.refresh(current_user)
+        
+        return current_user
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Username or email already taken"
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/change-password", tags=["profile"])
+def change_password(
+    password_change: PasswordChange,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Change current user's password"""
+    # Verify old password
+    if not current_user.verify_password(password_change.old_password):
+        raise HTTPException(
+            status_code=400,
+            detail="Current password is incorrect"
+        )
+    
+    # Hash and set new password
+    from app.auth.jwt import get_password_hash
+    current_user.password = get_password_hash(password_change.new_password)
+    current_user.updated_at = datetime.now(timezone.utc)
+    
+    db.commit()
+    
+    return {"message": "Password changed successfully"}
+
 
 # =====================================================================
 # Calculations Endpoints (BREAD)
