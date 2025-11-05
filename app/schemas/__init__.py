@@ -1,11 +1,11 @@
 # app/schemas/__init__.py
 from .user import (
-    UserBase,
     UserCreate,
     UserResponse,
     UserLogin,
-    UserUpdate,
-    PasswordUpdate
+    UserProfileUpdate,
+    PasswordChange,
+    UserProfileResponse
 )
 
 from .token import Token, TokenData, TokenResponse
@@ -18,12 +18,12 @@ from .calculation import (
 )
 
 __all__ = [
-    'UserBase',
     'UserCreate',
     'UserResponse',
     'UserLogin',
-    'UserUpdate',
-    'PasswordUpdate',
+    'UserProfileUpdate',
+    'PasswordChange',
+    'UserProfileResponse',
     'Token',
     'TokenData',
     'TokenResponse',
