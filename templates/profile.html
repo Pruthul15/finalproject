@@ -1,0 +1,258 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="row mt-5">
+        <div class="col-md-8 mx-auto">
+            <div class="card shadow">
+                <div class="card-header bg-primary text-white">
+                    <h3 class="mb-0">User Profile</h3>
+                </div>
+                <div class="card-body">
+                    <!-- Profile Information Display -->
+                    <div id="profileSection">
+                        <h5>Profile Information</h5>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label"><strong>Username:</strong></label>
+                                <p id="usernameDisplay" class="form-control-plaintext"></p>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"><strong>Email:</strong></label>
+                                <p id="emailDisplay" class="form-control-plaintext"></p>
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label"><strong>First Name:</strong></label>
+                                <p id="firstNameDisplay" class="form-control-plaintext"></p>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label"><strong>Last Name:</strong></label>
+                                <p id="lastNameDisplay" class="form-control-plaintext"></p>
+                            </div>
+                        </div>
+                        <button class="btn btn-warning" onclick="showEditForm()">Edit Profile</button>
+                    </div>
+
+                    <!-- Edit Form (Hidden by default) -->
+                    <form id="editForm" style="display:none;" onsubmit="submitProfileUpdate(event)">
+                        <h5>Edit Profile</h5>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="editUsername" class="form-label">Username</label>
+                                <input type="text" class="form-control" id="editUsername" required>
+                                <small id="usernameError" class="text-danger"></small>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="editEmail" class="form-label">Email</label>
+                                <input type="email" class="form-control" id="editEmail" required>
+                                <small id="emailError" class="text-danger"></small>
+                            </div>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="editFirstName" class="form-label">First Name</label>
+                                <input type="text" class="form-control" id="editFirstName" required>
+                                <small id="firstNameError" class="text-danger"></small>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="editLastName" class="form-label">Last Name</label>
+                                <input type="text" class="form-control" id="editLastName" required>
+                                <small id="lastNameError" class="text-danger"></small>
+                            </div>
+                        </div>
+                        <div class="btn-group">
+                            <button type="submit" class="btn btn-success">Save Changes</button>
+                            <button type="button" class="btn btn-secondary" onclick="cancelEdit()">Cancel</button>
+                        </div>
+                    </form>
+
+                    <hr class="my-4">
+
+                    <!-- Password Change Section -->
+                    <h5>Change Password</h5>
+                    <form id="passwordForm" onsubmit="submitPasswordChange(event)">
+                        <div class="mb-3">
+                            <label for="oldPassword" class="form-label">Current Password</label>
+                            <input type="password" class="form-control" id="oldPassword" required>
+                            <small id="oldPasswordError" class="text-danger"></small>
+                        </div>
+                        <div class="mb-3">
+                            <label for="newPassword" class="form-label">New Password</label>
+                            <input type="password" class="form-control" id="newPassword" required>
+                            <small id="newPasswordError" class="text-danger"></small>
+                            <small class="text-muted d-block mt-1">
+                                Password must contain: 8+ characters, uppercase, lowercase, digit, special character (!@#$%^&*)
+                            </small>
+                        </div>
+                        <div class="mb-3">
+                            <label for="confirmPassword" class="form-label">Confirm New Password</label>
+                            <input type="password" class="form-control" id="confirmPassword" required>
+                            <small id="confirmPasswordError" class="text-danger"></small>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Change Password</button>
+                    </form>
+
+                    <!-- Success/Error Messages -->
+                    <div id="successAlert" class="alert alert-success alert-dismissible fade show mt-3" style="display:none;" role="alert">
+                        <span id="successMessage"></span>
+                        <button type="button" class="btn-close" onclick="this.parentElement.style.display='none';"></button>
+                    </div>
+                    <div id="errorAlert" class="alert alert-danger alert-dismissible fade show mt-3" style="display:none;" role="alert">
+                        <span id="errorMessage"></span>
+                        <button type="button" class="btn-close" onclick="this.parentElement.style.display='none';"></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Load profile on page load
+    document.addEventListener('DOMContentLoaded', loadProfile);
+
+    async function loadProfile() {
+        try {
+            const token = localStorage.getItem('access_token');
+            if (!token) {
+                window.location.href = '/login';
+                return;
+            }
+            
+            const response = await fetch('/api/profile', {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            if (response.status === 401) {
+                window.location.href = '/login';
+                return;
+            }
+            
+            if (!response.ok) throw new Error('Failed to load profile');
+            
+            const profile = await response.json();
+            document.getElementById('usernameDisplay').textContent = profile.username;
+            document.getElementById('emailDisplay').textContent = profile.email;
+            document.getElementById('firstNameDisplay').textContent = profile.first_name;
+            document.getElementById('lastNameDisplay').textContent = profile.last_name;
+            
+            // Pre-fill edit form
+            document.getElementById('editUsername').value = profile.username;
+            document.getElementById('editEmail').value = profile.email;
+            document.getElementById('editFirstName').value = profile.first_name;
+            document.getElementById('editLastName').value = profile.last_name;
+        } catch (error) {
+            showError('Failed to load profile: ' + error.message);
+        }
+    }
+
+    function showEditForm() {
+        document.getElementById('profileSection').style.display = 'none';
+        document.getElementById('editForm').style.display = 'block';
+    }
+
+    function cancelEdit() {
+        document.getElementById('editForm').style.display = 'none';
+        document.getElementById('profileSection').style.display = 'block';
+        clearErrors();
+    }
+
+    async function submitProfileUpdate(event) {
+        event.preventDefault();
+        clearErrors();
+        
+        const data = {
+            username: document.getElementById('editUsername').value,
+            email: document.getElementById('editEmail').value,
+            first_name: document.getElementById('editFirstName').value,
+            last_name: document.getElementById('editLastName').value
+        };
+        
+        try {
+            const token = localStorage.getItem('access_token');
+            const response = await fetch('/api/profile', {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify(data)
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                showError(error.detail || 'Failed to update profile');
+                return;
+            }
+            
+            showSuccess('Profile updated successfully!');
+            cancelEdit();
+            loadProfile();
+        } catch (error) {
+            showError('Error: ' + error.message);
+        }
+    }
+
+    async function submitPasswordChange(event) {
+        event.preventDefault();
+        clearErrors();
+        
+        const oldPassword = document.getElementById('oldPassword').value;
+        const newPassword = document.getElementById('newPassword').value;
+        const confirmPassword = document.getElementById('confirmPassword').value;
+        
+        if (newPassword !== confirmPassword) {
+            document.getElementById('confirmPasswordError').textContent = 'Passwords do not match';
+            return;
+        }
+        
+        try {
+            const token = localStorage.getItem('access_token');
+            const response = await fetch('/api/change-password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                    old_password: oldPassword,
+                    new_password: newPassword,
+                    confirm_password: confirmPassword
+                })
+            });
+            
+            if (!response.ok) {
+                const error = await response.json();
+                showError(error.detail || 'Failed to change password');
+                return;
+            }
+            
+            showSuccess('Password changed successfully!');
+            document.getElementById('passwordForm').reset();
+        } catch (error) {
+            showError('Error: ' + error.message);
+        }
+    }
+
+    function showSuccess(message) {
+        document.getElementById('successMessage').textContent = message;
+        document.getElementById('successAlert').style.display = 'block';
+        setTimeout(() => {
+            document.getElementById('successAlert').style.display = 'none';
+        }, 5000);
+    }
+
+    function showError(message) {
+        document.getElementById('errorMessage').textContent = message;
+        document.getElementById('errorAlert').style.display = 'block';
+    }
+
+    function clearErrors() {
+        document.querySelectorAll('small.text-danger').forEach(el => {
+            el.textContent = '';
+        });
+    }
+</script>
+{% endblock %}
