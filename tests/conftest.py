@@ -138,7 +138,6 @@ def seed_users(db_session: Session, request) -> List[User]:
         user_data = create_fake_user()
         user = User.register(db_session, user_data)
         users.append(user)
-    
     db_session.commit()
     logger.info(f"Seeded {len(users)} users.")
     return users
@@ -147,7 +146,6 @@ def seed_users(db_session: Session, request) -> List[User]:
 def auth_headers(client: TestClient) -> Dict[str, str]:
     """Create authenticated user and return headers."""
     user_data = create_fake_user()
-    
     # Register
     reg_response = client.post(
         "/auth/register",
@@ -156,10 +154,8 @@ def auth_headers(client: TestClient) -> Dict[str, str]:
             "confirm_password": user_data["password"]
         }
     )
-    
     if reg_response.status_code not in [200, 201]:
         pytest.skip(f"Registration failed: {reg_response.json()}")
-    
     # Login
     login_response = client.post(
         "/auth/login",
@@ -168,10 +164,8 @@ def auth_headers(client: TestClient) -> Dict[str, str]:
             "password": user_data["password"]
         }
     )
-    
     if login_response.status_code != 200:
         pytest.skip(f"Login failed: {login_response.json()}")
-    
     token = login_response.json().get("access_token") or login_response.json().get("token")
     return {"Authorization": f"Bearer {token}"}
 
@@ -191,7 +185,6 @@ def event_loop_policy():
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     return None
 
-
 @pytest_asyncio.fixture
 async def page():
     """Provide Playwright browser page for E2E tests."""
@@ -200,7 +193,6 @@ async def page():
     except ImportError:
         pytest.skip("Playwright not installed")
         return
-    
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context()
@@ -209,54 +201,55 @@ async def page():
         await context.close()
         await browser.close()
 
-
 @pytest.fixture(scope="session")
 def fastapi_server():
     """Provide FastAPI test server URL - PORT 8001."""
     return "http://localhost:8001"
-
 
 @pytest.fixture(scope="session")
 def base_url(fastapi_server: str) -> str:
     """Provide base URL for E2E tests."""
     return fastapi_server
 
-
 @pytest_asyncio.fixture
-async def test_user_login(client: TestClient, base_url: str):
-    """Create user and return login info for E2E tests."""
-    user_data = create_fake_user()
-    
-    # Register
-    reg_response = client.post(
-        "/auth/register",
-        json={
-            **user_data,
-            "confirm_password": user_data["password"]
+async def test_user_login(page, base_url):
+    """
+    Registers a new user through the API, logs in to get JWT,
+    then sets JWT in localStorage for Playwright browser session.
+    """
+    import uuid
+    username = f"e2euser_{uuid.uuid4().hex[:8]}"
+    password = "TestPass@123"
+    email = f"{username}@test.com"
+    # Register user via API
+    await page.request.post(
+        f"{base_url}/auth/register",
+        data={
+            "username": username,
+            "email": email,
+            "password": password,
+            "first_name": "Test",
+            "last_name": "User",
+            "confirm_password": password
         }
     )
-    
-    if reg_response.status_code not in [200, 201]:
-        pytest.skip(f"Registration failed: {reg_response.json()}")
-    
-    # Login
-    login_response = client.post(
-        "/auth/login",
-        json={
-            "username": user_data["username"],
-            "password": user_data["password"]
+    # Log in to get token
+    login_response = await page.request.post(
+        f"{base_url}/auth/login",
+        data={
+            "username": username,
+            "password": password
         }
     )
-    
-    if login_response.status_code != 200:
-        pytest.skip(f"Login failed: {login_response.json()}")
-    
-    token = login_response.json().get("access_token")
-    
+    login_data = await login_response.json()
+    token = login_data["access_token"]
+    # Set token in browser localStorage before visiting /profile
+    await page.goto(f"{base_url}/login")
+    await page.evaluate(f"localStorage.setItem('access_token', '{token}')")
     return {
-        "username": user_data["username"],
-        "password": user_data["password"],
-        "email": user_data["email"],
+        "username": username,
+        "password": password,
+        "email": email,
         "token": token,
         "base_url": base_url
     }
@@ -285,7 +278,6 @@ def pytest_runtest_makereport(item, call):
     """Capture test results for debugging."""
     outcome = yield
     rep = outcome.get_result()
-    
     if rep.when == "call" and rep.failed:
         logger.error(f"Test failed: {item.name}")
         if rep.longrepr:
