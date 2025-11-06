@@ -1,5 +1,4 @@
 {% extends "layout.html" %}
-
 {% block content %}
 <div class="container">
     <div class="row mt-5">
@@ -34,7 +33,6 @@
                         </div>
                         <button class="btn btn-warning" onclick="showEditForm()">Edit Profile</button>
                     </div>
-
                     <!-- Edit Form (Hidden by default) -->
                     <form id="editForm" style="display:none;" onsubmit="submitProfileUpdate(event)">
                         <h5>Edit Profile</h5>
@@ -67,9 +65,7 @@
                             <button type="button" class="btn btn-secondary" onclick="cancelEdit()">Cancel</button>
                         </div>
                     </form>
-
                     <hr class="my-4">
-
                     <!-- Password Change Section -->
                     <h5>Change Password</h5>
                     <form id="passwordForm" onsubmit="submitPasswordChange(event)">
@@ -93,11 +89,10 @@
                         </div>
                         <button type="submit" class="btn btn-primary">Change Password</button>
                     </form>
-
                     <!-- Success/Error Messages -->
                     <div id="successAlert" class="alert alert-success alert-dismissible fade show mt-3" style="display:none;" role="alert">
                         <span id="successMessage"></span>
-                        <button type="button" class="btn-close" onclick="this.parentElement.style.display='none';"></button>
+                        <button type="button" class="btn-close"></button>
                     </div>
                     <div id="errorAlert" class="alert alert-danger alert-dismissible fade show mt-3" style="display:none;" role="alert">
                         <span id="errorMessage"></span>
@@ -108,10 +103,17 @@
         </div>
     </div>
 </div>
-
 <script>
-    // Load profile on page load
-    document.addEventListener('DOMContentLoaded', loadProfile);
+    document.addEventListener('DOMContentLoaded', function() {
+        loadProfile();
+
+        // Success alert close now reloads/cancels
+        document.getElementById('successAlert').querySelector('.btn-close').onclick = function() {
+            document.getElementById('successAlert').style.display = 'none';
+            cancelEdit();
+            loadProfile();
+        };
+    });
 
     async function loadProfile() {
         try {
@@ -120,25 +122,17 @@
                 window.location.href = '/login';
                 return;
             }
-            
-            const response = await fetch('/api/profile', {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
-            
+            const response = await fetch('/api/profile', { headers: { 'Authorization': `Bearer ${token}` } });
             if (response.status === 401) {
                 window.location.href = '/login';
                 return;
             }
-            
             if (!response.ok) throw new Error('Failed to load profile');
-            
             const profile = await response.json();
             document.getElementById('usernameDisplay').textContent = profile.username;
             document.getElementById('emailDisplay').textContent = profile.email;
             document.getElementById('firstNameDisplay').textContent = profile.first_name;
             document.getElementById('lastNameDisplay').textContent = profile.last_name;
-            
-            // Pre-fill edit form
             document.getElementById('editUsername').value = profile.username;
             document.getElementById('editEmail').value = profile.email;
             document.getElementById('editFirstName').value = profile.first_name;
@@ -147,29 +141,24 @@
             showError('Failed to load profile: ' + error.message);
         }
     }
-
     function showEditForm() {
         document.getElementById('profileSection').style.display = 'none';
         document.getElementById('editForm').style.display = 'block';
     }
-
     function cancelEdit() {
         document.getElementById('editForm').style.display = 'none';
         document.getElementById('profileSection').style.display = 'block';
         clearErrors();
     }
-
     async function submitProfileUpdate(event) {
         event.preventDefault();
         clearErrors();
-        
         const data = {
             username: document.getElementById('editUsername').value,
             email: document.getElementById('editEmail').value,
             first_name: document.getElementById('editFirstName').value,
             last_name: document.getElementById('editLastName').value
         };
-        
         try {
             const token = localStorage.getItem('access_token');
             const response = await fetch('/api/profile', {
@@ -180,34 +169,27 @@
                 },
                 body: JSON.stringify(data)
             });
-            
             if (!response.ok) {
                 const error = await response.json();
                 showError(error.detail || 'Failed to update profile');
                 return;
             }
-            
             showSuccess('Profile updated successfully!');
-            cancelEdit();
-            loadProfile();
         } catch (error) {
             showError('Error: ' + error.message);
         }
     }
-
     async function submitPasswordChange(event) {
         event.preventDefault();
         clearErrors();
-        
         const oldPassword = document.getElementById('oldPassword').value;
         const newPassword = document.getElementById('newPassword').value;
         const confirmPassword = document.getElementById('confirmPassword').value;
-        
         if (newPassword !== confirmPassword) {
             document.getElementById('confirmPasswordError').textContent = 'Passwords do not match';
+            showError('Passwords do not match');
             return;
         }
-        
         try {
             const token = localStorage.getItem('access_token');
             const response = await fetch('/api/change-password', {
@@ -216,39 +198,29 @@
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}`
                 },
-                body: JSON.stringify({
-                    old_password: oldPassword,
-                    new_password: newPassword,
-                    confirm_password: confirmPassword
-                })
+                body: JSON.stringify({ old_password: oldPassword, new_password: newPassword, confirm_password: confirmPassword })
             });
-            
             if (!response.ok) {
                 const error = await response.json();
                 showError(error.detail || 'Failed to change password');
                 return;
             }
-            
             showSuccess('Password changed successfully!');
             document.getElementById('passwordForm').reset();
         } catch (error) {
             showError('Error: ' + error.message);
         }
     }
-
     function showSuccess(message) {
+        let alertDiv = document.getElementById('successAlert');
         document.getElementById('successMessage').textContent = message;
-        document.getElementById('successAlert').style.display = 'block';
-        setTimeout(() => {
-            document.getElementById('successAlert').style.display = 'none';
-        }, 5000);
+        alertDiv.style.display = 'block';
+        alertDiv.classList.remove('hidden'); // Important: forcibly show if a class was hiding
     }
-
     function showError(message) {
         document.getElementById('errorMessage').textContent = message;
         document.getElementById('errorAlert').style.display = 'block';
     }
-
     function clearErrors() {
         document.querySelectorAll('small.text-danger').forEach(el => {
             el.textContent = '';
