@@ -181,25 +181,37 @@ def login_form(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = D
     }
 
 # =====================================================================
-# USER PROFILE ROUTES (NEW)
+# USER PROFILE ROUTES (FIXED)
 # =====================================================================
 
 @app.get("/api/profile", response_model=UserProfileResponse, tags=["profile"])
-def get_profile(current_user: User = Depends(get_current_active_user)):
+def get_profile(
+    current_user: UserResponse = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     """Get current user's profile"""
-    return current_user
+    # Fetch the actual User model from database
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
 
 @app.put("/api/profile", response_model=UserProfileResponse, tags=["profile"])
 def update_profile(
     profile_update: UserProfileUpdate,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Update current user's profile (username, email, name)"""
+    # Fetch the actual User model from database
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
     try:
         # Check if new username already exists (and it's not their current username)
-        if profile_update.username != current_user.username:
+        if profile_update.username != user.username:
             existing_user = db.query(User).filter(
                 User.username == profile_update.username
             ).first()
@@ -210,7 +222,7 @@ def update_profile(
                 )
         
         # Check if new email already exists (and it's not their current email)
-        if profile_update.email != current_user.email:
+        if profile_update.email != user.email:
             existing_user = db.query(User).filter(
                 User.email == profile_update.email
             ).first()
@@ -221,16 +233,16 @@ def update_profile(
                 )
         
         # Update user
-        current_user.username = profile_update.username
-        current_user.email = profile_update.email
-        current_user.first_name = profile_update.first_name
-        current_user.last_name = profile_update.last_name
-        current_user.updated_at = datetime.now(timezone.utc)
+        user.username = profile_update.username
+        user.email = profile_update.email
+        user.first_name = profile_update.first_name
+        user.last_name = profile_update.last_name
+        user.updated_at = datetime.now(timezone.utc)
         
         db.commit()
-        db.refresh(current_user)
+        db.refresh(user)
         
-        return current_user
+        return user
     except IntegrityError:
         db.rollback()
         raise HTTPException(
@@ -245,12 +257,17 @@ def update_profile(
 @app.post("/api/change-password", tags=["profile"])
 def change_password(
     password_change: PasswordChange,
-    current_user: User = Depends(get_current_active_user),
+    current_user: UserResponse = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """Change current user's password"""
+    # Fetch the actual User model from database
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
     # Verify old password
-    if not current_user.verify_password(password_change.old_password):
+    if not user.verify_password(password_change.old_password):
         raise HTTPException(
             status_code=400,
             detail="Current password is incorrect"
@@ -258,8 +275,8 @@ def change_password(
     
     # Hash and set new password
     from app.auth.jwt import get_password_hash
-    current_user.password = get_password_hash(password_change.new_password)
-    current_user.updated_at = datetime.now(timezone.utc)
+    user.password = get_password_hash(password_change.new_password)
+    user.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     
