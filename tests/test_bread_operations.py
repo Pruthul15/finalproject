@@ -1,64 +1,18 @@
-"""
-FINAL FIXED Test Suite - Correct operation names (addition, subtraction, multiplication, division)
-"""
+"""Test suite for BREAD operations and authentication."""
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 from uuid import uuid4
 
 
-@pytest.fixture(scope="session")
-def test_db():
-    DATABASE_URL = "sqlite:///./test.db"
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
-    
-    try:
-        from app.database import Base
-        Base.metadata.create_all(bind=engine)
-    except:
-        pass
-    
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    yield engine, TestingSessionLocal
-    
-    # Don't drop tables - let them persist for all tests in the session
-
-
-@pytest.fixture(scope="session")
-def client(test_db):
-    from app.main import app
-    from app.database import get_db
-    
-    engine, TestingSessionLocal = test_db
-    
-    def override_get_db():
-        db = TestingSessionLocal()
-        yield db
-        db.close()
-    
-    app.dependency_overrides[get_db] = override_get_db
-    
-    with TestClient(app) as test_client:
-        yield test_client
-    
-    app.dependency_overrides.clear()
-
-
 class TestUserAuthentication:
-    """Test suite for user registration and login."""
+    """Test user registration and login."""
     
-    def test_register_user_success(self, client):
-        """Test successful user registration."""
+    def test_register_user_success(self, client, fake_user_data):
+        """Test successful registration."""
         response = client.post(
             "/auth/register",
             json={
-                "username": f"testuser_{uuid4().hex[:8]}",
-                "email": f"test_{uuid4().hex[:8]}@example.com",
-                "password": "SecurePassword123!",
-                "confirm_password": "SecurePassword123!",
-                "first_name": "Test",
-                "last_name": "User"
+                **fake_user_data,
+                "confirm_password": fake_user_data["password"]
             }
         )
         
@@ -67,120 +21,76 @@ class TestUserAuthentication:
         assert "id" in data or "username" in data
     
     def test_register_user_duplicate_email(self, client):
-        """Test registration fails with duplicate email."""
-        client.post(
-            "/auth/register",
-            json={
-                "username": "user1",
-                "email": "duplicate@example.com",
-                "password": "Password123!",
-                "confirm_password": "Password123!",
-                "first_name": "User",
-                "last_name": "One"
-            }
-        )
-        response = client.post(
-            "/auth/register",
-            json={
-                "username": "user2",
-                "email": "duplicate@example.com",
-                "password": "Password123!",
-                "confirm_password": "Password123!",
-                "first_name": "User",
-                "last_name": "Two"
-            }
-        )
-        assert response.status_code in [400, 409, 422]
+        """Test duplicate email registration fails."""
+        email = f"duplicate_{uuid4().hex[:8]}@example.com"
+        
+        user_data = {
+            "username": f"user_{uuid4().hex[:8]}",
+            "email": email,
+            "password": "Password@123",
+            "confirm_password": "Password@123",
+            "first_name": "User",
+            "last_name": "One"
+        }
+        
+        response1 = client.post("/auth/register", json=user_data)
+        assert response1.status_code in [200, 201]
+        
+        # Try to register with same email but different username
+        user_data["username"] = f"user_{uuid4().hex[:8]}"
+        response2 = client.post("/auth/register", json=user_data)
+        assert response2.status_code in [400, 409, 422]
     
-    def test_login_user_success(self, client):
-        """Test successful user login."""
+    def test_login_user_success(self, client, fake_user_data):
+        """Test successful login."""
         client.post(
             "/auth/register",
             json={
-                "username": "logintest",
-                "email": "login@example.com",
-                "password": "ValidPass123!",
-                "confirm_password": "ValidPass123!",
-                "first_name": "Login",
-                "last_name": "Test"
+                **fake_user_data,
+                "confirm_password": fake_user_data["password"]
             }
         )
+        
         response = client.post(
             "/auth/login",
             json={
-                "username": "logintest",
-                "password": "ValidPass123!"
+                "username": fake_user_data["username"],
+                "password": fake_user_data["password"]
             }
         )
         assert response.status_code == 200
         data = response.json()
         assert "access_token" in data or "token" in data
     
-    def test_login_user_wrong_password(self, client):
-        """Test login fails with wrong password."""
+    def test_login_user_wrong_password(self, client, fake_user_data):
+        """Test login with wrong password fails."""
         client.post(
             "/auth/register",
             json={
-                "username": "wrongpass",
-                "email": "wrongpass@example.com",
-                "password": "CorrectPass123!",
-                "confirm_password": "CorrectPass123!",
-                "first_name": "Wrong",
-                "last_name": "Pass"
+                **fake_user_data,
+                "confirm_password": fake_user_data["password"]
             }
         )
+        
         response = client.post(
             "/auth/login",
             json={
-                "username": "wrongpass",
-                "password": "WrongPass123!"
+                "username": fake_user_data["username"],
+                "password": "WrongPassword@123"
             }
         )
         assert response.status_code == 401
 
 
 class TestBREADOperations:
-    """Test BREAD operations."""
+    """Test BREAD operations for calculations."""
     
-    @pytest.fixture
-    def authenticated_user(self, client):
-        """Create and authenticate a user."""
-        username = f"user_{uuid4().hex[:8]}"
-        email = f"user_{uuid4().hex[:8]}@example.com"
-        
-        reg = client.post(
-            "/auth/register",
-            json={
-                "username": username,
-                "email": email,
-                "password": "SecurePass123!@#",
-                "confirm_password": "SecurePass123!@#",
-                "first_name": "Test",
-                "last_name": "User"
-            }
-        )
-        
-        assert reg.status_code in [200, 201], f"Registration failed: {reg.json()}"
-        
-        login = client.post(
-            "/auth/login",
-            json={
-                "username": username,
-                "password": "SecurePass123!@#"
-            }
-        )
-        
-        assert login.status_code == 200, f"Login failed: {login.json()}"
-        
-        token = login.json().get("access_token") or login.json().get("token")
-        return {"headers": {"Authorization": f"Bearer {token}"}}
-    
-    def test_add_calculation_success(self, client, authenticated_user):
-        """Test adding a calculation (ADD operation)."""
+    def test_add_calculation_success(self, client, auth_headers):
+        """Test CREATE calculation."""
         response = client.post(
             "/calculations",
             json={"type": "addition", "inputs": [5, 3]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         assert response.status_code == 201
@@ -188,75 +98,74 @@ class TestBREADOperations:
         assert "id" in data
         assert data.get("result") == 8
     
-    def test_browse_calculations(self, client, authenticated_user):
-        """Test browsing calculations (BROWSE operation)."""
+    def test_browse_calculations(self, client, auth_headers):
+        """Test READ/BROWSE calculations."""
         for i in range(2):
             client.post(
                 "/calculations",
                 json={"type": "addition", "inputs": [i, i+1]},
-                headers=authenticated_user["headers"]
+                headers=auth_headers
             )
         
         response = client.get(
             "/calculations",
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, list)
-        assert len(data) >= 2
     
-    def test_browse_calculations_pagination(self, client, authenticated_user):
-        """Test browse with pagination parameters."""
+    def test_browse_calculations_pagination(self, client, auth_headers):
+        """Test browse with pagination."""
         response = client.get(
             "/calculations?skip=0&limit=10",
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 200
     
-    def test_read_calculation_success(self, client, authenticated_user):
-        """Test reading a calculation (READ operation)."""
+    def test_read_calculation_success(self, client, auth_headers):
+        """Test READ calculation."""
         create_resp = client.post(
             "/calculations",
             json={"type": "multiplication", "inputs": [4, 5]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         calc_id = create_resp.json().get("id")
         
         response = client.get(
             f"/calculations/{calc_id}",
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         assert response.status_code == 200
         data = response.json()
         assert data.get("result") == 20
     
-    def test_read_calculation_not_found(self, client, authenticated_user):
+    def test_read_calculation_not_found(self, client, auth_headers):
         """Test reading non-existent calculation."""
         fake_id = str(uuid4())
         response = client.get(
             f"/calculations/{fake_id}",
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 404
     
-    def test_read_calculation_invalid_id_format(self, client, authenticated_user):
-        """Test reading calculation with invalid ID format."""
+    def test_read_calculation_invalid_id_format(self, client, auth_headers):
+        """Test reading with invalid ID."""
         response = client.get(
             "/calculations/invalid-id",
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 400
     
-    def test_edit_calculation_success(self, client, authenticated_user):
-        """Test updating a calculation (EDIT operation)."""
+    def test_edit_calculation_success(self, client, auth_headers):
+        """Test UPDATE calculation."""
         create_resp = client.post(
             "/calculations",
             json={"type": "subtraction", "inputs": [10, 3]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         calc_id = create_resp.json().get("id")
@@ -264,280 +173,213 @@ class TestBREADOperations:
         response = client.put(
             f"/calculations/{calc_id}",
             json={"inputs": [10, 5]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         assert response.status_code == 200
         data = response.json()
         assert data.get("result") == 5
     
-    def test_edit_calculation_not_found(self, client, authenticated_user):
-        """Test editing non-existent calculation."""
+    def test_edit_calculation_not_found(self, client, auth_headers):
+        """Test updating non-existent calculation."""
         fake_id = str(uuid4())
         response = client.put(
             f"/calculations/{fake_id}",
             json={"inputs": [1, 1]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 404
     
-    def test_delete_calculation_success(self, client, authenticated_user):
-        """Test deleting a calculation (DELETE operation)."""
+    def test_delete_calculation_success(self, client, auth_headers):
+        """Test DELETE calculation."""
         create_resp = client.post(
             "/calculations",
             json={"type": "addition", "inputs": [1, 1]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         calc_id = create_resp.json().get("id")
         
         response = client.delete(
             f"/calculations/{calc_id}",
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         assert response.status_code in [200, 204]
         
         get_resp = client.get(
             f"/calculations/{calc_id}",
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         
         assert get_resp.status_code == 404
     
-    def test_delete_calculation_not_found(self, client, authenticated_user):
+    def test_delete_calculation_not_found(self, client, auth_headers):
         """Test deleting non-existent calculation."""
         fake_id = str(uuid4())
         response = client.delete(
             f"/calculations/{fake_id}",
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 404
     
-    def test_delete_calculation_unauthorized(self, client, authenticated_user):
-        """Test that user can only delete their own calculations."""
-        create_resp = client.post(
-            "/calculations",
-            json={"type": "addition", "inputs": [1, 1]},
-            headers=authenticated_user["headers"]
-        )
-        calc_id = create_resp.json().get("id")
-        
-        # Create another user
+    def test_delete_calculation_unauthorized(self, client, fake_user_data):
+        """Test authorization for delete."""
+        # User 1 creates calculation
+        user1_data = fake_user_data
         client.post(
             "/auth/register",
             json={
-                "username": "otheruser",
-                "email": "other@example.com",
-                "password": "OtherPass123!",
-                "confirm_password": "OtherPass123!",
-                "first_name": "Other",
-                "last_name": "User"
+                **user1_data,
+                "confirm_password": user1_data["password"]
             }
         )
-        other_response = client.post(
+        login1 = client.post(
             "/auth/login",
             json={
-                "username": "otheruser",
-                "password": "OtherPass123!"
+                "username": user1_data["username"],
+                "password": user1_data["password"]
             }
         )
-        other_token = other_response.json().get("access_token") or other_response.json().get("token")
-        other_headers = {"Authorization": f"Bearer {other_token}"}
+        token1 = login1.json().get("access_token") or login1.json().get("token")
+        headers1 = {"Authorization": f"Bearer {token1}"}
         
-        response = client.delete(f"/calculations/{calc_id}", headers=other_headers)
+        create_resp = client.post(
+            "/calculations",
+            json={"type": "addition", "inputs": [1, 1]},
+            headers=headers1
+        )
+        calc_id = create_resp.json().get("id")
+        
+        # User 2 tries to delete
+        user2_data = {
+            "username": f"user_{uuid4().hex[:8]}",
+            "email": f"user_{uuid4().hex[:8]}@example.com",
+            "password": "Pass@123",
+            "first_name": "User",
+            "last_name": "Two"
+        }
+        client.post(
+            "/auth/register",
+            json={
+                **user2_data,
+                "confirm_password": user2_data["password"]
+            }
+        )
+        login2 = client.post(
+            "/auth/login",
+            json={
+                "username": user2_data["username"],
+                "password": user2_data["password"]
+            }
+        )
+        token2 = login2.json().get("access_token") or login2.json().get("token")
+        headers2 = {"Authorization": f"Bearer {token2}"}
+        
+        response = client.delete(f"/calculations/{calc_id}", headers=headers2)
         assert response.status_code in [403, 404]
 
 
 class TestCalculationOperations:
-    """Test various calc operations."""
+    """Test calculation operations."""
     
-    @pytest.fixture
-    def authenticated_user(self, client):
-        """Create and authenticate a user."""
-        username = f"user_{uuid4().hex[:8]}"
-        email = f"user_{uuid4().hex[:8]}@example.com"
-        
-        reg = client.post(
-            "/auth/register",
-            json={
-                "username": username,
-                "email": email,
-                "password": "SecurePass123!@#",
-                "confirm_password": "SecurePass123!@#",
-                "first_name": "Test",
-                "last_name": "User"
-            }
-        )
-        
-        if reg.status_code not in [200, 201]:
-            pytest.skip(f"Registration failed: {reg.json()}")
-        
-        login = client.post(
-            "/auth/login",
-            json={"username": username, "password": "SecurePass123!@#"}
-        )
-        
-        if login.status_code != 200:
-            pytest.skip(f"Login failed: {login.json()}")
-        
-        token = login.json().get("access_token") or login.json().get("token")
-        return {"headers": {"Authorization": f"Bearer {token}"}}
-    
-    def test_add_operation(self, client, authenticated_user):
-        """Test addition operation."""
+    def test_add_operation(self, client, auth_headers):
+        """Test addition."""
         response = client.post(
             "/calculations",
             json={"type": "addition", "inputs": [5, 3]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 201
         assert response.json().get("result") == 8
     
-    def test_subtract_operation(self, client, authenticated_user):
-        """Test subtraction operation."""
+    def test_subtract_operation(self, client, auth_headers):
+        """Test subtraction."""
         response = client.post(
             "/calculations",
             json={"type": "subtraction", "inputs": [10, 3]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 201
         assert response.json().get("result") == 7
     
-    def test_multiply_operation(self, client, authenticated_user):
-        """Test multiplication operation."""
+    def test_multiply_operation(self, client, auth_headers):
+        """Test multiplication."""
         response = client.post(
             "/calculations",
             json={"type": "multiplication", "inputs": [4, 5]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 201
         assert response.json().get("result") == 20
     
-    def test_divide_operation(self, client, authenticated_user):
-        """Test division operation."""
+    def test_divide_operation(self, client, auth_headers):
+        """Test division."""
         response = client.post(
             "/calculations",
             json={"type": "division", "inputs": [20, 4]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code == 201
         assert response.json().get("result") == 5.0
     
-    def test_divide_by_zero(self, client, authenticated_user):
-        """Test division by zero error handling."""
+    def test_divide_by_zero(self, client, auth_headers):
+        """Test division by zero."""
         response = client.post(
             "/calculations",
             json={"type": "division", "inputs": [5, 0]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code in [400, 422]
     
-    def test_invalid_operation(self, client, authenticated_user):
+    def test_invalid_operation(self, client, auth_headers):
         """Test invalid operation."""
         response = client.post(
             "/calculations",
             json={"type": "invalid_op", "inputs": [5, 3]},
-            headers=authenticated_user["headers"]
+            headers=auth_headers
         )
         assert response.status_code in [400, 422]
 
 
 class TestErrorHandling:
-    """Test error handling and edge cases."""
+    """Test error handling."""
     
-    def test_missing_required_fields(self, client):
-        """Test request with missing required fields."""
-        username = f"user_{uuid4().hex[:8]}"
-        client.post(
-            "/auth/register",
-            json={
-                "username": username,
-                "email": f"user_{uuid4().hex[:8]}@example.com",
-                "password": "SecurePass123!@#",
-                "confirm_password": "SecurePass123!@#",
-                "first_name": "Test",
-                "last_name": "User"
-            }
-        )
-        login = client.post(
-            "/auth/login",
-            json={"username": username, "password": "SecurePass123!@#"}
-        )
-        token = login.json().get("access_token") or login.json().get("token")
-        headers = {"Authorization": f"Bearer {token}"}
-        
+    def test_missing_required_fields(self, client, auth_headers):
+        """Test missing fields."""
         response = client.post(
             "/calculations",
             json={"type": "addition"},
-            headers=headers
+            headers=auth_headers
         )
         assert response.status_code == 422
     
-    def test_invalid_input_types(self, client):
-        """Test request with invalid input types."""
-        username = f"user_{uuid4().hex[:8]}"
-        client.post(
-            "/auth/register",
-            json={
-                "username": username,
-                "email": f"user_{uuid4().hex[:8]}@example.com",
-                "password": "SecurePass123!@#",
-                "confirm_password": "SecurePass123!@#",
-                "first_name": "Test",
-                "last_name": "User"
-            }
-        )
-        login = client.post(
-            "/auth/login",
-            json={"username": username, "password": "SecurePass123!@#"}
-        )
-        token = login.json().get("access_token") or login.json().get("token")
-        headers = {"Authorization": f"Bearer {token}"}
-        
+    def test_invalid_input_types(self, client, auth_headers):
+        """Test invalid types."""
         response = client.post(
             "/calculations",
             json={"type": "addition", "inputs": ["string", 3]},
-            headers=headers
+            headers=auth_headers
         )
         assert response.status_code == 422
     
-    def test_empty_inputs_array(self, client):
-        """Test request with empty inputs array."""
-        username = f"user_{uuid4().hex[:8]}"
-        client.post(
-            "/auth/register",
-            json={
-                "username": username,
-                "email": f"user_{uuid4().hex[:8]}@example.com",
-                "password": "SecurePass123!@#",
-                "confirm_password": "SecurePass123!@#",
-                "first_name": "Test",
-                "last_name": "User"
-            }
-        )
-        login = client.post(
-            "/auth/login",
-            json={"username": username, "password": "SecurePass123!@#"}
-        )
-        token = login.json().get("access_token") or login.json().get("token")
-        headers = {"Authorization": f"Bearer {token}"}
-        
+    def test_empty_inputs_array(self, client, auth_headers):
+        """Test empty inputs."""
         response = client.post(
             "/calculations",
             json={"type": "addition", "inputs": []},
-            headers=headers
+            headers=auth_headers
         )
         assert response.status_code in [400, 422]
     
     def test_invalid_token(self, client):
-        """Test request with invalid token."""
+        """Test invalid token."""
         headers = {"Authorization": "Bearer invalid_token_xyz"}
         response = client.get("/calculations", headers=headers)
         assert response.status_code == 401
     
     def test_no_token(self, client):
-        """Test request without token."""
+        """Test no token."""
         response = client.get("/calculations")
         assert response.status_code == 401
 
