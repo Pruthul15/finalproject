@@ -68,14 +68,12 @@
 <script>
 // Wait for DOM to be fully loaded
 document.addEventListener('DOMContentLoaded', function() {
-    // Get form and alert elements
     const form = document.getElementById('loginForm');
     const errorAlert = document.getElementById('errorAlert');
     const errorMessage = document.getElementById('errorMessage');
     const successAlert = document.getElementById('successAlert');
     const successMessage = document.getElementById('successMessage');
 
-    // Verify elements exist
     if (!form || !errorAlert || !errorMessage || !successAlert || !successMessage) {
         console.error('Required elements not found');
         return;
@@ -101,26 +99,18 @@ document.addEventListener('DOMContentLoaded', function() {
         localStorage.setItem('username', tokenData.username);
     }
 
-    // Handle form submission
     form.addEventListener('submit', async function(e) {
         e.preventDefault();
-
-        // Clear previous alerts
         errorAlert.classList.add('hidden');
         successAlert.classList.add('hidden');
-
-        // Get form data
         const formData = {
             username: form.username.value.trim(),
             password: form.password.value
         };
-
-        // Basic validation
         if (!formData.username || !formData.password) {
             showError('Please fill in all fields');
             return;
         }
-
         try {
             const response = await fetch('/auth/login', {
                 method: 'POST',
@@ -129,17 +119,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 },
                 body: JSON.stringify(formData)
             });
-
             const data = await response.json();
-
             if (!response.ok) {
                 throw new Error(data.detail || 'Login failed');
             }
-
-            // Store tokens and user data
             storeTokens(data);
 
-            // Handle remember me
             if (form.remember.checked) {
                 localStorage.setItem('remember_login', 'true');
                 localStorage.setItem('remembered_username', formData.username);
@@ -149,18 +134,14 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             showSuccess('Login successful! Redirecting...');
-
-            // Redirect to dashboard
             setTimeout(() => {
-                window.location.href = '/dashboard';
+                window.location.href = '/profile';
             }, 1000);
-
         } catch (error) {
             showError(error.message || 'Invalid username or password');
         }
     });
 
-    // Load remembered username if exists
     if (localStorage.getItem('remember_login') === 'true') {
         const rememberedUsername = localStorage.getItem('remembered_username');
         if (rememberedUsername) {
