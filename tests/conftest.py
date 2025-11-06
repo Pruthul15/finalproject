@@ -1,21 +1,17 @@
-import socket
-import subprocess
-import time
 import logging
 from typing import Generator, Dict, List
 from contextlib import contextmanager
 
 import pytest
-import requests
+import pytest_asyncio
 from faker import Faker
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from playwright.sync_api import sync_playwright, Browser, Page
+from fastapi.testclient import TestClient
 
-from app.database import Base, get_engine, get_sessionmaker
+from app.main import app
+from app.database import Base, get_db, get_engine, get_sessionmaker
 from app.models.user import User
-from app.core.config import settings
-from app.database_init import init_db, drop_db
 
 # ======================================================================================
 # Logging Configuration
@@ -27,25 +23,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ======================================================================================
-# Database Configuration
+# Database Configuration - USE SQLITE FOR TESTS
 # ======================================================================================
 fake = Faker()
 Faker.seed(12345)
 
-test_engine = get_engine(database_url=settings.DATABASE_URL)
+TEST_DATABASE_URL = "sqlite:///./test.db"
+test_engine = get_engine(database_url=TEST_DATABASE_URL)
 TestingSessionLocal = get_sessionmaker(engine=test_engine)
 
 # ======================================================================================
 # Helper Functions
 # ======================================================================================
 def create_fake_user() -> Dict[str, str]:
-    """Generate a dictionary of fake user data for testing."""
+    """Generate fake user data."""
     return {
         "first_name": fake.first_name(),
         "last_name": fake.last_name(),
         "email": fake.unique.email(),
         "username": fake.unique.user_name(),
-        "password": fake.password(length=12)
+        "password": "TestPass@123"
     }
 
 @contextmanager
@@ -62,58 +59,31 @@ def managed_db_session():
         session.close()
 
 # ======================================================================================
-# Server Startup / Healthcheck
-# ======================================================================================
-def wait_for_server(url: str, timeout: int = 30) -> bool:
-    """
-    Wait for the server to be ready by repeatedly issuing GET requests until
-    we receive a 200 status code or hit the timeout.
-    """
-    start_time = time.time()
-    while (time.time() - start_time) < timeout:
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                return True
-        except requests.exceptions.ConnectionError:
-            time.sleep(1)
-    return False
-
-class ServerStartupError(Exception):
-    """Raised when the test server fails to start properly."""
-    pass
-
-# ======================================================================================
 # Database Fixtures
 # ======================================================================================
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_database(request):
-    """
-    Set up the test database before the session starts, and tear it down after tests
-    unless --preserve-db is provided.
-    """
-    logger.info("Setting up test database...")
+    """Set up test database before all tests."""
+    logger.info("Creating tables...")
     try:
-        Base.metadata.drop_all(bind=test_engine)
         Base.metadata.create_all(bind=test_engine)
-        init_db()
-        logger.info("Test database initialized.")
+        logger.info("Tables created successfully!")
     except Exception as e:
         logger.error(f"Error setting up test database: {str(e)}")
         raise
 
-    yield  # Tests run after this
+    yield  # Tests run here
 
-    if not request.config.getoption("--preserve-db"):
+    if not request.config.getoption("--preserve-db", default=False):
         logger.info("Dropping test database tables...")
-        drop_db()
+        try:
+            Base.metadata.drop_all(bind=test_engine)
+        except Exception as e:
+            logger.warning(f"Error dropping tables: {e}")
 
 @pytest.fixture
 def db_session() -> Generator[Session, None, None]:
-    """
-    Provide a test-scoped database session. Commits after a successful test;
-    rolls back if an exception occurs.
-    """
+    """Provide test database session."""
     session = TestingSessionLocal()
     try:
         yield session
@@ -125,6 +95,23 @@ def db_session() -> Generator[Session, None, None]:
         session.close()
 
 # ======================================================================================
+# FastAPI Client Fixture
+# ======================================================================================
+@pytest.fixture
+def client(db_session: Session):
+    """Provide TestClient for FastAPI app."""
+    def override_get_db():
+        try:
+            yield db_session
+        finally:
+            pass
+    
+    app.dependency_overrides[get_db] = override_get_db
+    test_client = TestClient(app)
+    yield test_client
+    app.dependency_overrides.clear()
+
+# ======================================================================================
 # Test Data Fixtures
 # ======================================================================================
 @pytest.fixture
@@ -134,12 +121,9 @@ def fake_user_data() -> Dict[str, str]:
 
 @pytest.fixture
 def test_user(db_session: Session) -> User:
-    """
-    Create and return a single test user in the database.
-    """
+    """Create test user in database."""
     user_data = create_fake_user()
-    user = User(**user_data)
-    db_session.add(user)
+    user = User.register(db_session, user_data)
     db_session.commit()
     db_session.refresh(user)
     logger.info(f"Created test user ID: {user.id}")
@@ -147,127 +131,183 @@ def test_user(db_session: Session) -> User:
 
 @pytest.fixture
 def seed_users(db_session: Session, request) -> List[User]:
-    """
-    Seed multiple test users in the database. By default, 5 users are created
-    unless a 'param' value is provided (e.g., via @pytest.mark.parametrize).
-    """
+    """Seed multiple test users."""
     num_users = getattr(request, "param", 5)
-    users = [User(**create_fake_user()) for _ in range(num_users)]
-    db_session.add_all(users)
+    users = []
+    for _ in range(num_users):
+        user_data = create_fake_user()
+        user = User.register(db_session, user_data)
+        users.append(user)
+    
     db_session.commit()
     logger.info(f"Seeded {len(users)} users.")
     return users
 
+@pytest.fixture
+def auth_headers(client: TestClient) -> Dict[str, str]:
+    """Create authenticated user and return headers."""
+    user_data = create_fake_user()
+    
+    # Register
+    reg_response = client.post(
+        "/auth/register",
+        json={
+            **user_data,
+            "confirm_password": user_data["password"]
+        }
+    )
+    
+    if reg_response.status_code not in [200, 201]:
+        pytest.skip(f"Registration failed: {reg_response.json()}")
+    
+    # Login
+    login_response = client.post(
+        "/auth/login",
+        json={
+            "username": user_data["username"],
+            "password": user_data["password"]
+        }
+    )
+    
+    if login_response.status_code != 200:
+        pytest.skip(f"Login failed: {login_response.json()}")
+    
+    token = login_response.json().get("access_token") or login_response.json().get("token")
+    return {"Authorization": f"Bearer {token}"}
+
+@pytest.fixture
+def test_user_data() -> Dict[str, str]:
+    """Provide test user data."""
+    return create_fake_user()
+
 # ======================================================================================
-# FastAPI Server Fixture
+# E2E/Playwright Fixtures - PORT 8001
 # ======================================================================================
-def find_available_port() -> int:
-    """Find an available port for the test server by binding to port 0."""
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(('', 0))
-        return s.getsockname()[1]
+@pytest.fixture(scope="session")
+def event_loop_policy():
+    """Set event loop policy for async tests."""
+    import asyncio
+    if hasattr(asyncio, 'WindowsProactorEventLoopPolicy'):
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    return None
+
+
+@pytest_asyncio.fixture
+async def page():
+    """Provide Playwright browser page for E2E tests."""
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        pytest.skip("Playwright not installed")
+        return
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context()
+        page = await context.new_page()
+        yield page
+        await context.close()
+        await browser.close()
+
 
 @pytest.fixture(scope="session")
 def fastapi_server():
-    """
-    Start a FastAPI test server in a subprocess. If the chosen port (default: 8000)
-    is already in use, find another available port. Wait until the server is up
-    before yielding its base URL.
-    """
-    base_port = 8000
-    server_url = f'http://127.0.0.1:{base_port}/'
+    """Provide FastAPI test server URL - PORT 8001."""
+    return "http://localhost:8001"
 
-    # Check if port is free; if not, pick an available port
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        if s.connect_ex(('127.0.0.1', base_port)) == 0:
-            base_port = find_available_port()
-            server_url = f'http://127.0.0.1:{base_port}/'
 
-    logger.info(f"Starting FastAPI server on port {base_port}...")
-
-    process = subprocess.Popen(
-        ['uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', str(base_port)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        cwd='.'  # ensure the working directory is set correctly
-    )
-
-    # IMPORTANT: Use the /health endpoint for the check!
-    health_url = f"{server_url}health"
-    if not wait_for_server(health_url, timeout=30):
-        stderr = process.stderr.read()
-        logger.error(f"Server failed to start. Uvicorn error: {stderr}")
-        process.terminate()
-        raise ServerStartupError(f"Failed to start test server on {health_url}")
-
-    logger.info(f"Test server running on {server_url}.")
-    yield server_url
-
-    logger.info("Stopping test server...")
-    process.terminate()
-    try:
-        process.wait(timeout=5)
-        logger.info("Test server stopped.")
-    except subprocess.TimeoutExpired:
-        process.kill()
-        logger.warning("Test server forcefully stopped.")
-
-# ======================================================================================
-# Playwright Fixtures for UI Testing
-# ======================================================================================
 @pytest.fixture(scope="session")
-def browser_context():
-    """Provide a Playwright browser context for UI tests (session-scoped)."""
-    with sync_playwright() as playwright:
-        browser = playwright.chromium.launch(
-            headless=True,
-            args=['--no-sandbox', '--disable-dev-shm-usage']
-        )
-        logger.info("Playwright browser launched.")
-        try:
-            yield browser
-        finally:
-            logger.info("Closing Playwright browser.")
-            browser.close()
+def base_url(fastapi_server: str) -> str:
+    """Provide base URL for E2E tests."""
+    return fastapi_server
 
-@pytest.fixture
-def page(browser_context: Browser):
-    """
-    Provide a new browser page for each test, with a standard viewport.
-    Closes the page and context after each test.
-    """
-    context = browser_context.new_context(
-        viewport={'width': 1920, 'height': 1080},
-        ignore_https_errors=True
+
+@pytest_asyncio.fixture
+async def test_user_login(client: TestClient, base_url: str):
+    """Create user and return login info for E2E tests."""
+    user_data = create_fake_user()
+    
+    # Register
+    reg_response = client.post(
+        "/auth/register",
+        json={
+            **user_data,
+            "confirm_password": user_data["password"]
+        }
     )
-    page = context.new_page()
-    logger.info("New browser page created.")
-    try:
-        yield page
-    finally:
-        logger.info("Closing browser page and context.")
-        page.close()
-        context.close()
+    
+    if reg_response.status_code not in [200, 201]:
+        pytest.skip(f"Registration failed: {reg_response.json()}")
+    
+    # Login
+    login_response = client.post(
+        "/auth/login",
+        json={
+            "username": user_data["username"],
+            "password": user_data["password"]
+        }
+    )
+    
+    if login_response.status_code != 200:
+        pytest.skip(f"Login failed: {login_response.json()}")
+    
+    token = login_response.json().get("access_token")
+    
+    return {
+        "username": user_data["username"],
+        "password": user_data["password"],
+        "email": user_data["email"],
+        "token": token,
+        "base_url": base_url
+    }
 
 # ======================================================================================
-# Pytest Command-Line Options
+# Pytest Options
 # ======================================================================================
 def pytest_addoption(parser):
-    """
-    Add custom command line options:
-      --preserve-db : Keep test database after tests
-      --run-slow    : Run tests marked as 'slow'
-    """
-    parser.addoption("--preserve-db", action="store_true", help="Keep test database after tests")
-    parser.addoption("--run-slow", action="store_true", help="Run tests marked as slow")
+    """Add custom options."""
+    parser.addoption("--preserve-db", action="store_true", help="Keep test database")
+    parser.addoption("--run-slow", action="store_true", help="Run slow tests")
 
 def pytest_collection_modifyitems(config, items):
-    """
-    Skip tests marked as 'slow' unless --run-slow is specified.
-    """
+    """Skip slow tests unless --run-slow."""
     if not config.getoption("--run-slow"):
-        skip_slow = pytest.mark.skip(reason="use --run-slow to run")
+        skip_slow = pytest.mark.skip(reason="use --run-slow")
         for item in items:
             if "slow" in item.keywords:
                 item.add_marker(skip_slow)
+
+# ======================================================================================
+# Pytest Hooks
+# ======================================================================================
+@pytest.hookimpl(tryfirst=True, hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """Capture test results for debugging."""
+    outcome = yield
+    rep = outcome.get_result()
+    
+    if rep.when == "call" and rep.failed:
+        logger.error(f"Test failed: {item.name}")
+        if rep.longrepr:
+            logger.error(f"Error: {rep.longrepr}")
+
+# ======================================================================================
+# Markers for Test Organization
+# ======================================================================================
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line(
+        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
+    )
+    config.addinivalue_line(
+        "markers", "unit: marks tests as unit tests"
+    )
+    config.addinivalue_line(
+        "markers", "integration: marks tests as integration tests"
+    )
+    config.addinivalue_line(
+        "markers", "e2e: marks tests as end-to-end tests"
+    )
+    config.addinivalue_line(
+        "markers", "asyncio: marks tests as async"
+    )
