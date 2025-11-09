@@ -89,14 +89,15 @@
                         </div>
                         <button type="submit" class="btn btn-primary">Change Password</button>
                     </form>
+
                     <!-- Success/Error Messages -->
-                    <div id="successAlert" class="alert alert-success alert-dismissible fade show mt-3" style="display:none;" role="alert">
+                    <div id="successAlert" class="alert alert-success alert-dismissible fade d-none mt-3" role="alert">
                         <span id="successMessage"></span>
                         <button type="button" class="btn-close"></button>
                     </div>
-                    <div id="errorAlert" class="alert alert-danger alert-dismissible fade show mt-3" style="display:none;" role="alert">
+                    <div id="errorAlert" class="alert alert-danger alert-dismissible fade d-none mt-3" role="alert">
                         <span id="errorMessage"></span>
-                        <button type="button" class="btn-close" onclick="this.parentElement.style.display='none';"></button>
+                        <button type="button" class="btn-close" onclick="this.parentElement.classList.add('d-none');"></button>
                     </div>
                 </div>
             </div>
@@ -107,9 +108,10 @@
     document.addEventListener('DOMContentLoaded', function() {
         loadProfile();
 
-        // Success alert close now reloads/cancels
+        // Success alert close reloads/cancels
         document.getElementById('successAlert').querySelector('.btn-close').onclick = function() {
-            document.getElementById('successAlert').style.display = 'none';
+            document.getElementById('successAlert').classList.add('d-none');
+            document.getElementById('successAlert').classList.remove('show');
             cancelEdit();
             loadProfile();
         };
@@ -174,6 +176,7 @@
                 showError(error.detail || 'Failed to update profile');
                 return;
             }
+            // This guarantees a success message every time!
             showSuccess('Profile updated successfully!');
         } catch (error) {
             showError('Error: ' + error.message);
@@ -214,12 +217,20 @@
     function showSuccess(message) {
         let alertDiv = document.getElementById('successAlert');
         document.getElementById('successMessage').textContent = message;
-        alertDiv.style.display = 'block';
-        alertDiv.classList.remove('hidden'); // Important: forcibly show if a class was hiding
+        alertDiv.classList.remove('d-none');
+        alertDiv.classList.add('show');
+        setTimeout(() => {
+            alertDiv.classList.remove('show');
+            alertDiv.classList.add('d-none');
+            cancelEdit();
+            loadProfile();
+        }, 2000);
     }
     function showError(message) {
+        let alertDiv = document.getElementById('errorAlert');
         document.getElementById('errorMessage').textContent = message;
-        document.getElementById('errorAlert').style.display = 'block';
+        alertDiv.classList.remove('d-none');
+        alertDiv.classList.add('show');
     }
     function clearErrors() {
         document.querySelectorAll('small.text-danger').forEach(el => {
