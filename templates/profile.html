@@ -208,8 +208,14 @@
                 showError(error.detail || 'Failed to change password');
                 return;
             }
-            showSuccess('Password changed successfully!');
+            showSuccess('Password changed successfully! Redirecting to login...');
             document.getElementById('passwordForm').reset();
+            // Clear localStorage and redirect to login after 2 seconds
+            setTimeout(() => {
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('refresh_token');
+                window.location.href = '/login';
+            }, 2000);
         } catch (error) {
             showError('Error: ' + error.message);
         }
@@ -219,12 +225,16 @@
         document.getElementById('successMessage').textContent = message;
         alertDiv.classList.remove('d-none');
         alertDiv.classList.add('show');
-        setTimeout(() => {
-            alertDiv.classList.remove('show');
-            alertDiv.classList.add('d-none');
-            cancelEdit();
-            loadProfile();
-        }, 2000);
+        // Don't auto-hide for password change (it will redirect)
+        // Only auto-hide for profile updates
+        if (message.includes('Profile')) {
+            setTimeout(() => {
+                alertDiv.classList.remove('show');
+                alertDiv.classList.add('d-none');
+                cancelEdit();
+                loadProfile();
+            }, 2000);
+        }
     }
     function showError(message) {
         let alertDiv = document.getElementById('errorAlert');
