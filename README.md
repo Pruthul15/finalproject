@@ -1,3 +1,171 @@
+# Final Project — FastAPI Calculator with Profile & Password Change
+
+This repository is the Final Project for the course. It is a FastAPI application that implements a calculator service with user authentication (JWT), profile management (view/update), and password change functionality. The project includes unit, integration, and Playwright E2E tests, Docker support, and a CI pipeline (GitHub Actions) scaffold.
+
+---
+
+**Status:** feature-complete for user profile & password-change. Tests included (unit, integration, e2e).
+
+## Quick summary
+- Backend: FastAPI + SQLAlchemy
+- Auth: JWT (access + refresh), bcrypt password hashing (Passlib)
+- Frontend: Jinja2 templates (profile page includes edit & change-password forms)
+- Tests: pytest (unit & integration) + Playwright (E2E)
+- Container: Docker + docker-compose
+
+---
+
+## Requirements
+- Python 3.10+ (project uses a virtual environment)
+- `venv` (standard Python venv)
+- Docker & Docker Compose (for container runs)
+
+Files of interest:
+- `app/main.py` - application routes (web + API)
+- `app/models/user.py` - User model, hashing, authentication helpers
+- `app/schemas/user.py` - Pydantic schemas for profile and password change
+- `templates/profile.html` - Profile page with edit & change-password UI
+- `tests/` - unit, integration, and e2e test suites
+
+---
+
+## Setup (local, recommended)
+Follow these steps to run the app and tests locally using `python3` and a `venv`.
+
+1. Create and activate venv
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+2. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+3. (Optional) Install Playwright browsers for E2E tests
+
+```bash
+python -m playwright install chromium
+```
+
+---
+
+## Run the application locally (development)
+By default the app tries to use the `DATABASE_URL` from `app/core/config.py`. For quick local runs and for tests you can use a local SQLite DB by overriding the env var.
+
+```bash
+# Use sqlite for quick local run (no Postgres required)
+export DATABASE_URL="sqlite:///./local_dev.db"
+uvicorn app.main:app --host 127.0.0.1 --port 8001
+```
+
+After startup the app will create tables automatically. Open:
+
+- Home: http://127.0.0.1:8001/
+- Profile page: http://127.0.0.1:8001/profile
+- API docs (when running): http://127.0.0.1:8001/docs
+
+The profile page expects an `access_token` in `localStorage` (the E2E tests set this automatically after creating a test user).
+
+---
+
+## Tests
+
+Run tests from the project root with your venv active.
+
+1) Unit + Integration tests
+
+```bash
+python -m pytest tests/unit tests/integration -q
+```
+
+2) E2E (Playwright) tests
+
+Start the application first (use sqlite override shown above), then run:
+
+```bash
+# Ensure Playwright browsers are installed
+python -m playwright install chromium
+
+# Run E2E profile tests
+python -m pytest tests/e2e/test_profile_e2e.py -q
+```
+
+Notes:
+- E2E fixtures assume the app listens on `http://localhost:8001` (see `tests/conftest.py`).
+- The E2E fixture `test_user_login` registers a test user via the API and sets `access_token` into the browser `localStorage`.
+
+---
+
+## Feature details (what was added/verified for this final project)
+
+- User Profile page (`/profile`): view username, email, first/last name.
+- Edit profile: client-side form (template `templates/profile.html`) and backend `PUT /api/profile` which:
+  - validates uniqueness of username/email
+  - updates `username`, `email`, `first_name`, `last_name`
+- Password change: form on profile page and backend route `POST /api/change-password` which:
+  - verifies the current password
+  - validates and hashes the new password
+  - updates `user.password`
+- Tests:
+  - Unit tests for calculation & auth logic
+  - Integration tests for DB interactions and API routes
+  - Playwright E2E tests covering profile view, edit, and password-change flows (positive and negative scenarios)
+
+---
+
+## Docker (quick)
+
+Build and run with `docker-compose` (the repo includes `docker-compose.yml`):
+
+```bash
+docker-compose up --build -d
+# wait for DB to initialize (15s)
+docker-compose logs -f web
+```
+
+If you only want to build the image locally:
+
+```bash
+docker build -t finalproject:local .
+docker run -e DATABASE_URL="sqlite:///./local.db" -p 8001:8001 finalproject:local
+```
+
+---
+
+## CI / CD (notes)
+
+- The repository contains a GitHub Actions workflow scaffold to run tests and build Docker images. CI should:
+  - install dependencies
+  - run unit + integration tests
+  - start the app or required services and run E2E tests (Playwright)
+  - build Docker image and push to Docker Hub if tests pass
+
+I can scaffold or refine the `.github/workflows` files if you want CI to run Playwright E2E on GitHub-hosted runners (requires installing browsers and starting the app in the workflow).
+
+---
+
+## How you can proceed (options)
+
+- I can add/update a GitHub Actions workflow that runs the test matrix and builds/pushes Docker image. (CI/CD)
+- I can add Alembic migrations if you plan to change models in the future.
+- I can add a short developer `Makefile` or `scripts/` to simplify common commands (start, test, e2e).
+
+Tell me which one you want and I'll implement it.
+
+---
+
+## Contact / Author
+
+- Project owner: Pruthul Patel
+- Repo path: workspace root
+
+---
+
+License: MIT
 # Assignment 13: JWT Authentication & CI/CD Pipeline
 
 ## 📋 Project Overview
