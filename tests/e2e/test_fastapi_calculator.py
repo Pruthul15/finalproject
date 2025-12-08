@@ -5,11 +5,6 @@ import requests
 
 from app.models.calculation import Calculation
 
-@pytest.fixture
-def base_url(fastapi_server: str) -> str:
-    """Returns the FastAPI server base URL without a trailing slash."""
-    return fastapi_server.rstrip("/")
-
 def _parse_datetime(dt_str: str) -> datetime:
     """Helper function to parse datetime strings from API responses."""
     if dt_str.endswith('Z'):
