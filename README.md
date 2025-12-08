@@ -35,8 +35,9 @@ Follow these steps to run the app and tests locally using `python3` and a `venv`
 1. Create and activate venv
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv venv
+source venv/bin/activate
+
 ```
 
 2. Install dependencies
@@ -506,7 +507,7 @@ If port 5432 or 8000 is already in use:
 ```bash
 # Change Docker port (edit docker-compose.yml)
 sed -i 's/5432:5432/5433:5432/g' docker-compose.yml
-sed -i 's/:5432/:5433/g' app/core/config.py
+sed -i 's/:5432/:5434/g' app/core/config.py
 
 # Then restart
 docker-compose down && docker-compose up -d
